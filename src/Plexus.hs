@@ -1,0 +1,73 @@
+-- | Plexus Protocol Types and Client
+--
+-- Re-exports from Substrate (transport) and Plexus (protocol types).
+--
+-- = Quick Start
+--
+-- @
+-- import Plexus
+-- import qualified Streaming.Prelude as S
+-- import Data.Aeson (toJSON)
+--
+-- main :: IO ()
+-- main = do
+--   -- Connect to substrate
+--   conn <- connect defaultConfig
+--
+--   -- Call bash.execute and stream results
+--   S.print $ substrateRpc conn "bash_execute" (toJSON ["echo hello"])
+--
+--   -- Clean up
+--   disconnect conn
+-- @
+--
+-- = Stream Items
+--
+-- The plexus protocol returns a unified stream type with variants:
+--
+-- * 'StreamProgress' - Progress updates with optional percentage
+-- * 'StreamData' - Actual data with content type information
+-- * 'StreamError' - Error (may be recoverable)
+-- * 'StreamDone' - Stream completed successfully
+--
+module Plexus
+  ( -- * Connection (re-exported from Substrate.Client)
+    SubstrateConnection
+  , SubstrateConfig(..)
+  , defaultConfig
+  , connect
+  , disconnect
+
+    -- * Core RPC (streaming)
+  , substrateRpc
+
+    -- * High-level RPC (collected, re-exported from Substrate.Transport)
+  , rpcCall
+  , rpcCallWith
+  , fetchSchemaAt
+  , invokeMethod
+  , invokeRaw
+
+    -- * Stream Types
+  , PlexusStreamItem(..)
+  , Provenance(..)
+
+    -- * Schema Types
+  , PluginSchema(..)
+  , MethodSchema(..)
+  , ChildSummary(..)
+  , PluginHash
+  , SchemaResult(..)
+
+    -- * JSON-RPC Types
+  , RpcRequest(..)
+  , RpcResponse(..)
+  , RpcError(..)
+  , RequestId(..)
+  , SubscriptionId(..)
+  ) where
+
+import Plexus.Types
+import Plexus.Schema.Recursive
+import Substrate.Client
+import Substrate.Transport

@@ -32,6 +32,7 @@ module Plexus.Schema.Recursive
   , MethodSchema(..)
   , ChildSummary(..)
   , PluginHash
+  , SchemaResult(..)
 
     -- * Queries
   , isHub
@@ -42,7 +43,10 @@ module Plexus.Schema.Recursive
 
     -- * JSON Parsing
   , parsePluginSchema
+  , parseSchemaResult
   ) where
+
+import Control.Applicative ((<|>))
 
 import Data.Aeson
 import Data.Maybe (fromMaybe)
@@ -113,12 +117,13 @@ instance ToJSON MethodSchema where
 -- Children are summaries only - fetch full schema on-demand when navigating.
 -- This is the wire format: one layer of observation at a time.
 data PluginSchema = PluginSchema
-  { psNamespace   :: Text
-  , psVersion     :: Text
-  , psDescription :: Text
-  , psHash        :: PluginHash
-  , psMethods     :: [MethodSchema]
-  , psChildren    :: Maybe [ChildSummary]  -- ^ Nothing = leaf, Just = hub
+  { psNamespace       :: Text
+  , psVersion         :: Text
+  , psDescription     :: Text
+  , psLongDescription :: Maybe Text  -- ^ Extended description (no word limit)
+  , psHash            :: PluginHash
+  , psMethods         :: [MethodSchema]
+  , psChildren        :: Maybe [ChildSummary]  -- ^ Nothing = leaf, Just = hub
   }
   deriving stock (Show, Eq, Generic)
 
@@ -127,19 +132,38 @@ instance FromJSON PluginSchema where
     <$> o .: "namespace"
     <*> o .: "version"
     <*> o .: "description"
+    <*> o .:? "long_description"
     <*> o .: "hash"
     <*> o .:? "methods" .!= []
     <*> o .:? "children"
 
 instance ToJSON PluginSchema where
   toJSON PluginSchema{..} = object
-    [ "namespace"   .= psNamespace
-    , "version"     .= psVersion
-    , "description" .= psDescription
-    , "hash"        .= psHash
-    , "methods"     .= psMethods
-    , "children"    .= psChildren
+    [ "namespace"        .= psNamespace
+    , "version"          .= psVersion
+    , "description"      .= psDescription
+    , "long_description" .= psLongDescription
+    , "hash"             .= psHash
+    , "methods"          .= psMethods
+    , "children"         .= psChildren
     ]
+
+-- | Result of a schema query - can be either a full plugin or just a method
+data SchemaResult
+  = SchemaPlugin PluginSchema
+  | SchemaMethod MethodSchema
+  deriving stock (Show, Eq)
+
+instance FromJSON SchemaResult where
+  parseJSON v =
+    -- Try PluginSchema first (has "namespace" field)
+    (SchemaPlugin <$> parseJSON v) <|>
+    -- Fall back to MethodSchema (has "name" field)
+    (SchemaMethod <$> parseJSON v)
+
+instance ToJSON SchemaResult where
+  toJSON (SchemaPlugin p) = toJSON p
+  toJSON (SchemaMethod m) = toJSON m
 
 -- ============================================================================
 -- Basic Queries
@@ -173,4 +197,10 @@ childNamespaces = map csNamespace . pluginChildren
 parsePluginSchema :: Value -> Either Text PluginSchema
 parsePluginSchema val = case fromJSON val of
   Success schema -> Right schema
+  Error err -> Left $ T.pack err
+
+-- | Parse a SchemaResult (plugin or method) from schema event content
+parseSchemaResult :: Value -> Either Text SchemaResult
+parseSchemaResult val = case fromJSON val of
+  Success result -> Right result
   Error err -> Left $ T.pack err
