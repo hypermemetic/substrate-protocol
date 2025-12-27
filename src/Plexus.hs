@@ -48,6 +48,10 @@ module Plexus
   , invokeMethod
   , invokeRaw
 
+    -- * High-level RPC (streaming)
+  , rpcCallStreaming
+  , invokeMethodStreaming
+
     -- * Stream Types
   , PlexusStreamItem(..)
   , Provenance(..)

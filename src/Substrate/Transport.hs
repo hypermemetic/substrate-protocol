@@ -3,9 +3,13 @@
 -- Pure IO functions for WebSocket communication with the Substrate backend.
 -- All Plexus calls go through 'plexus_call' for routing.
 module Substrate.Transport
-  ( -- * RPC Calls
+  ( -- * RPC Calls (collected)
     rpcCall
   , rpcCallWith
+
+    -- * RPC Calls (streaming)
+  , rpcCallStreaming
+  , invokeMethodStreaming
 
     -- * Schema Fetching
   , fetchSchemaAt
@@ -13,7 +17,7 @@ module Substrate.Transport
   , extractSchema
   , extractSchemaResult
 
-    -- * Method Invocation
+    -- * Method Invocation (collected)
   , invokeMethod
   , invokeRaw
   ) where
@@ -46,6 +50,28 @@ doCallInner cfg method params = do
   items <- S.toList_ $ substrateRpc conn method params
   disconnect conn
   pure items
+
+-- | Streaming RPC call - invokes callback for each item as it arrives
+rpcCallStreaming :: SubstrateConfig -> Text -> Value -> (PlexusStreamItem -> IO ()) -> IO (Either Text ())
+rpcCallStreaming cfg method params onItem = do
+  result <- (Right <$> doCallStreaming cfg method params onItem)
+    `catch` \(e :: SomeException) ->
+      pure $ Left $ T.pack $ "Connection error: " <> show e
+  pure result
+
+doCallStreaming :: SubstrateConfig -> Text -> Value -> (PlexusStreamItem -> IO ()) -> IO ()
+doCallStreaming cfg method params onItem = do
+  conn <- connect cfg
+  S.mapM_ onItem $ substrateRpc conn method params
+  disconnect conn
+
+-- | Streaming method invocation
+invokeMethodStreaming :: SubstrateConfig -> [Text] -> Text -> Value -> (PlexusStreamItem -> IO ()) -> IO (Either Text ())
+invokeMethodStreaming cfg namespacePath method params onItem = do
+  let fullPath = if null namespacePath then ["plexus"] else namespacePath
+  let dotPath = T.intercalate "." (fullPath ++ [method])
+  let callParams = object ["method" .= dotPath, "params" .= params]
+  rpcCallStreaming cfg "plexus_call" callParams onItem
 
 -- | Fetch schema at a specific path
 -- Empty path = root (plexus.schema)
