@@ -31,6 +31,7 @@ module Plexus.Schema
   , extractActivationSchemaEvent
   , extractFullSchemaEvent
   , extractHashEvent
+  , extractRecursiveSchema
   ) where
 
 import Control.Applicative ((<|>))
@@ -44,6 +45,7 @@ import qualified Data.Text as T
 import GHC.Generics (Generic)
 
 import Plexus.Types (PlexusStreamItem(..))
+import qualified Plexus.Schema.Recursive as RecursiveSchema
 
 -- ============================================================================
 -- Core Schema Types (from plexus_schema subscription)
@@ -554,3 +556,13 @@ extractHashEvent (StreamData _ _ contentType dat)
   | otherwise = Nothing
 extractHashEvent (StreamError _ _ err _) = Just (HashError err)
 extractHashEvent _ = Nothing
+
+-- | Extract recursive plugin schema from stream item
+-- The plexus_schema subscription uses content_type "plexus.schema"
+-- and returns the full recursive schema structure
+extractRecursiveSchema :: PlexusStreamItem -> Maybe (Either Text RecursiveSchema.PluginSchema)
+extractRecursiveSchema (StreamData _ _ contentType dat)
+  | contentType == "plexus.schema" = Just $ RecursiveSchema.parsePluginSchema dat
+  | otherwise = Nothing
+extractRecursiveSchema (StreamError _ _ err _) = Just (Left err)
+extractRecursiveSchema _ = Nothing

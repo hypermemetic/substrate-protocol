@@ -12,6 +12,7 @@ module Plexus.Types
     -- * Plexus Stream Types
   , PlexusStreamItem(..)
   , Provenance(..)
+  , StreamMetadata(..)
   , GuidanceErrorType(..)
   , GuidanceSuggestion(..)
 
@@ -126,15 +127,41 @@ instance FromJSON SubNotifParams where
     <*> o .: "result"
 
 -- | Provenance tracking nested calls through activations
+-- Now just a list of namespace segments (no wrapper object)
 newtype Provenance = Provenance { segments :: [Text] }
   deriving stock (Show, Eq, Generic)
 
 instance FromJSON Provenance where
-  parseJSON = withObject "Provenance" $ \o ->
-    Provenance <$> o .: "segments"
+  parseJSON v = case v of
+    -- New format: just an array ["plexus", "echo"]
+    Array arr -> Provenance <$> mapM parseJSON (foldr (:) [] arr)
+    -- Legacy format: {"segments": [...]}
+    Object o -> Provenance <$> o .: "segments"
+    _ -> fail "Provenance: expected array or object"
 
 instance ToJSON Provenance where
-  toJSON (Provenance segs) = object ["segments" .= segs]
+  toJSON (Provenance segs) = toJSON segs
+
+-- | Metadata wrapper for stream results
+data StreamMetadata = StreamMetadata
+  { metaProvenance :: Provenance
+  , metaPlexusHash :: Text
+  , metaTimestamp  :: Integer
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance FromJSON StreamMetadata where
+  parseJSON = withObject "StreamMetadata" $ \o -> StreamMetadata
+    <$> o .: "provenance"
+    <*> o .: "plexus_hash"
+    <*> o .: "timestamp"
+
+instance ToJSON StreamMetadata where
+  toJSON StreamMetadata{..} = object
+    [ "provenance"  .= metaProvenance
+    , "plexus_hash" .= metaPlexusHash
+    , "timestamp"   .= metaTimestamp
+    ]
 
 -- | Error type from guidance events
 data GuidanceErrorType
@@ -217,6 +244,9 @@ instance ToJSON GuidanceSuggestion where
     ]
 
 -- | Unified stream item from the plexus
+--
+-- New format uses metadata wrapper:
+-- @{"type":"data","metadata":{...},"content_type":"...","content":{...}}@
 data PlexusStreamItem
   = StreamProgress
       { itemPlexusHash  :: Text
@@ -253,49 +283,79 @@ data PlexusStreamItem
 instance FromJSON PlexusStreamItem where
   parseJSON = withObject "PlexusStreamItem" $ \o -> do
     typ <- o .: "type" :: Parser Text
-    hash <- o .: "plexus_hash"
-    case typ of
-      "progress" -> StreamProgress hash
-        <$> o .: "provenance"
-        <*> o .: "message"
-        <*> o .:? "percentage"
-      "data" -> StreamData hash
-        <$> o .: "provenance"
-        <*> o .: "content_type"
-        <*> o .: "data"
-      "guidance" -> StreamGuidance hash
-        <$> o .: "provenance"
-        <*> o .: "error_type"
-        <*> o .: "suggestion"
-        <*> o .:? "available_methods"
-        <*> o .:? "method_schema"
-      "error" -> StreamError hash
-        <$> o .: "provenance"
-        <*> o .: "error"
-        <*> o .: "recoverable"
-      "done" -> StreamDone hash
-        <$> o .: "provenance"
-      _ -> fail $ "Unknown event type: " <> show typ
+    -- New format: metadata is a nested object
+    mMeta <- o .:? "metadata" :: Parser (Maybe StreamMetadata)
+    case mMeta of
+      Just meta -> parseWithMetadata typ meta o
+      Nothing -> parseLegacy typ o
+
+    where
+      -- New format: metadata wrapper
+      parseWithMetadata :: Text -> StreamMetadata -> Object -> Parser PlexusStreamItem
+      parseWithMetadata typ meta o = do
+        let hash = metaPlexusHash meta
+            prov = metaProvenance meta
+        case typ of
+          "progress" -> StreamProgress hash prov
+            <$> o .: "message"
+            <*> o .:? "percentage"
+          "data" -> StreamData hash prov
+            <$> o .: "content_type"
+            <*> o .: "content"
+          "guidance" -> StreamGuidance hash prov
+            <$> o .: "error_type"
+            <*> o .: "suggestion"
+            <*> o .:? "available_methods"
+            <*> o .:? "method_schema"
+          "error" -> StreamError hash prov
+            <$> o .: "message"
+            <*> o .:? "recoverable" .!= False
+          "done" -> pure $ StreamDone hash prov
+          _ -> fail $ "Unknown event type: " <> T.unpack typ
+
+      -- Legacy format: flat structure
+      parseLegacy :: Text -> Object -> Parser PlexusStreamItem
+      parseLegacy typ o = do
+        hash <- o .: "plexus_hash"
+        case typ of
+          "progress" -> StreamProgress hash
+            <$> o .: "provenance"
+            <*> o .: "message"
+            <*> o .:? "percentage"
+          "data" -> StreamData hash
+            <$> o .: "provenance"
+            <*> o .: "content_type"
+            <*> o .: "data"
+          "guidance" -> StreamGuidance hash
+            <$> o .: "provenance"
+            <*> o .: "error_type"
+            <*> o .: "suggestion"
+            <*> o .:? "available_methods"
+            <*> o .:? "method_schema"
+          "error" -> StreamError hash
+            <$> o .: "provenance"
+            <*> o .: "error"
+            <*> o .: "recoverable"
+          "done" -> StreamDone hash
+            <$> o .: "provenance"
+          _ -> fail $ "Unknown event type: " <> T.unpack typ
 
 instance ToJSON PlexusStreamItem where
   toJSON (StreamProgress hash prov msg pct) = object
-    [ "plexus_hash" .= hash
-    , "type" .= ("progress" :: Text)
-    , "provenance" .= prov
+    [ "type" .= ("progress" :: Text)
+    , "metadata" .= StreamMetadata prov hash 0
     , "message" .= msg
     , "percentage" .= pct
     ]
   toJSON (StreamData hash prov ct dat) = object
-    [ "plexus_hash" .= hash
-    , "type" .= ("data" :: Text)
-    , "provenance" .= prov
+    [ "type" .= ("data" :: Text)
+    , "metadata" .= StreamMetadata prov hash 0
     , "content_type" .= ct
-    , "data" .= dat
+    , "content" .= dat
     ]
   toJSON (StreamGuidance hash prov errorType suggestion availMethods methodSchema) = object $
-    [ "plexus_hash" .= hash
-    , "type" .= ("guidance" :: Text)
-    , "provenance" .= prov
+    [ "type" .= ("guidance" :: Text)
+    , "metadata" .= StreamMetadata prov hash 0
     , "error_type" .= errorType
     , "suggestion" .= suggestion
     ] <> catMaybes
@@ -303,16 +363,14 @@ instance ToJSON PlexusStreamItem where
     , ("method_schema" .=) <$> methodSchema
     ]
   toJSON (StreamError hash prov err rec) = object
-    [ "plexus_hash" .= hash
-    , "type" .= ("error" :: Text)
-    , "provenance" .= prov
-    , "error" .= err
+    [ "type" .= ("error" :: Text)
+    , "metadata" .= StreamMetadata prov hash 0
+    , "message" .= err
     , "recoverable" .= rec
     ]
   toJSON (StreamDone hash prov) = object
-    [ "plexus_hash" .= hash
-    , "type" .= ("done" :: Text)
-    , "provenance" .= prov
+    [ "type" .= ("done" :: Text)
+    , "metadata" .= StreamMetadata prov hash 0
     ]
 
 -- | Create a subscription request
