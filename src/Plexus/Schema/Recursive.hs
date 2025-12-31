@@ -92,6 +92,7 @@ data MethodSchema = MethodSchema
   , methodHash        :: PluginHash
   , methodParams      :: Maybe Value  -- ^ JSON Schema for params
   , methodReturns     :: Maybe Value  -- ^ JSON Schema for return events
+  , methodStreaming   :: Bool         -- ^ True if method streams multiple events
   }
   deriving stock (Show, Eq, Generic)
 
@@ -102,6 +103,7 @@ instance FromJSON MethodSchema where
     <*> o .: "hash"
     <*> o .:? "params"
     <*> o .:? "returns"
+    <*> o .:? "streaming" .!= False
 
 instance ToJSON MethodSchema where
   toJSON MethodSchema{..} = object
@@ -110,6 +112,7 @@ instance ToJSON MethodSchema where
     , "hash"        .= methodHash
     , "params"      .= methodParams
     , "returns"     .= methodReturns
+    , "streaming"   .= methodStreaming
     ]
 
 -- | Shallow plugin schema (what we receive from plexus_schema)
