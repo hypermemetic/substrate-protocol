@@ -1,7 +1,7 @@
 -- | Low-level transport for Substrate RPC calls
 --
 -- Pure IO functions for WebSocket communication with the Substrate backend.
--- All Plexus calls go through 'plexus_call' for routing.
+-- All Plexus calls go through 'plexus.call' for routing.
 module Substrate.Transport
   ( -- * RPC Calls (collected)
     rpcCall
@@ -73,7 +73,7 @@ invokeMethodStreaming cfg namespacePath method params onItem = do
   let fullPath = if null namespacePath then ["plexus"] else namespacePath
   let dotPath = T.intercalate "." (fullPath ++ [method])
   let callParams = object ["method" .= dotPath, "params" .= params]
-  rpcCallStreaming cfg "plexus_call" callParams (unwrapPlexusCall onItem)
+  rpcCallStreaming cfg "plexus.call" callParams (unwrapPlexusCall onItem)
 
 -- | Fetch schema at a specific path
 -- Empty path = root (plexus.schema)
@@ -83,7 +83,7 @@ fetchSchemaAt cfg path = do
   let schemaMethod = if null path
         then "plexus.schema"
         else T.intercalate "." path <> ".schema"
-  result <- rpcCallWith cfg "plexus_call" (object ["method" .= schemaMethod])
+  result <- rpcCallWith cfg "plexus.call" (object ["method" .= schemaMethod])
   case result of
     Left err -> pure $ Left err
     Right items -> pure $ extractSchema items
@@ -104,7 +104,7 @@ fetchMethodSchemaAt cfg path methodName = do
   let schemaMethod = if null path
         then "plexus.schema"
         else T.intercalate "." path <> ".schema"
-  result <- rpcCallWith cfg "plexus_call" (object
+  result <- rpcCallWith cfg "plexus.call" (object
     [ "method" .= schemaMethod
     , "params" .= object ["method" .= methodName]
     ])
@@ -131,14 +131,14 @@ invokeMethod cfg namespacePath method params = do
   let fullPath = if null namespacePath then ["plexus"] else namespacePath
   let dotPath = T.intercalate "." (fullPath ++ [method])
   let callParams = object ["method" .= dotPath, "params" .= params]
-  fmap (fmap (map unwrapPlexusCallItem)) $ rpcCallWith cfg "plexus_call" callParams
+  fmap (fmap (map unwrapPlexusCallItem)) $ rpcCallWith cfg "plexus.call" callParams
 
 -- | Invoke with raw method path
 -- Automatically unwraps CallEvent from plexus.call responses
 invokeRaw :: SubstrateConfig -> Text -> Value -> IO (Either Text [PlexusStreamItem])
 invokeRaw cfg method params = do
   let callParams = object ["method" .= method, "params" .= params]
-  fmap (fmap (map unwrapPlexusCallItem)) $ rpcCallWith cfg "plexus_call" callParams
+  fmap (fmap (map unwrapPlexusCallItem)) $ rpcCallWith cfg "plexus.call" callParams
 
 -- | Unwrap CallEvent from plexus.call responses (streaming callback version)
 -- If the item is from plexus.call, parse the content as CallEvent and unwrap
