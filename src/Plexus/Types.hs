@@ -16,10 +16,6 @@ module Plexus.Types
   , GuidanceErrorType(..)
   , GuidanceSuggestion(..)
 
-    -- * CallEvent (from plexus.call responses)
-  , CallEvent(..)
-  , unwrapCallEvent
-
     -- * Helpers
   , mkSubscribeRequest
   , mkUnsubscribeRequest
@@ -398,45 +394,3 @@ mkUnsubscribeRequest rid unsubMethod subId = RpcRequest
 -- | Extract the plexus hash from a stream item
 getPlexusHash :: PlexusStreamItem -> Text
 getPlexusHash = itemPlexusHash
-
--- | Event type returned by plexus.call
--- Wraps the actual response from routed methods
-data CallEvent
-  = CallData
-      { callContent     :: Value
-      , callContentType :: Text
-      }
-  | CallProgress
-      { callMessage    :: Text
-      , callPercentage :: Maybe Double
-      }
-  | CallError
-      { callErrorMessage :: Text
-      , callErrorCode    :: Maybe Text
-      }
-  deriving stock (Show, Eq, Generic)
-
-instance FromJSON CallEvent where
-  parseJSON = withObject "CallEvent" $ \o -> do
-    typ <- o .: "type" :: Parser Text
-    case typ of
-      "data" -> CallData
-        <$> o .: "content"
-        <*> o .: "content_type"
-      "progress" -> CallProgress
-        <$> o .: "message"
-        <*> o .:? "percentage"
-      "error" -> CallError
-        <$> o .: "message"
-        <*> o .:? "code"
-      _ -> fail $ "Unknown CallEvent type: " <> T.unpack typ
-
--- | Unwrap a CallEvent into a PlexusStreamItem
--- Used to flatten responses from plexus.call back to the original format
-unwrapCallEvent :: Text -> Provenance -> CallEvent -> PlexusStreamItem
-unwrapCallEvent hash prov (CallData content contentType) =
-  StreamData hash prov contentType content
-unwrapCallEvent hash prov (CallProgress msg pct) =
-  StreamProgress hash prov msg pct
-unwrapCallEvent hash prov (CallError msg _code) =
-  StreamError hash prov msg False

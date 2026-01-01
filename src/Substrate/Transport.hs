@@ -24,13 +24,12 @@ module Substrate.Transport
 
 import Control.Exception (SomeException, catch)
 import Data.Aeson hiding (Error)
-import qualified Data.Aeson.Types
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Streaming.Prelude as S
 
 import Substrate.Client (SubstrateConfig(..), connect, disconnect, substrateRpc, defaultConfig)
-import Plexus.Types (PlexusStreamItem(..), CallEvent(..), unwrapCallEvent)
+import Plexus.Types (PlexusStreamItem(..))
 import Plexus.Schema.Recursive (PluginSchema, MethodSchema, SchemaResult(..), parsePluginSchema, parseSchemaResult)
 
 -- | Low-level RPC call with default localhost config
@@ -67,13 +66,12 @@ doCallStreaming cfg method params onItem = do
   disconnect conn
 
 -- | Streaming method invocation
--- Automatically unwraps CallEvent from plexus.call responses
 invokeMethodStreaming :: SubstrateConfig -> [Text] -> Text -> Value -> (PlexusStreamItem -> IO ()) -> IO (Either Text ())
 invokeMethodStreaming cfg namespacePath method params onItem = do
   let fullPath = if null namespacePath then ["plexus"] else namespacePath
   let dotPath = T.intercalate "." (fullPath ++ [method])
   let callParams = object ["method" .= dotPath, "params" .= params]
-  rpcCallStreaming cfg "plexus.call" callParams (unwrapPlexusCall onItem)
+  rpcCallStreaming cfg "plexus.call" callParams onItem
 
 -- | Fetch schema at a specific path
 -- Empty path = root (plexus.schema)
@@ -125,33 +123,15 @@ extractSchemaResult items =
       [] -> Left "No schema in response"
 
 -- | Invoke a method and return stream items
--- Automatically unwraps CallEvent from plexus.call responses
 invokeMethod :: SubstrateConfig -> [Text] -> Text -> Value -> IO (Either Text [PlexusStreamItem])
 invokeMethod cfg namespacePath method params = do
   let fullPath = if null namespacePath then ["plexus"] else namespacePath
   let dotPath = T.intercalate "." (fullPath ++ [method])
   let callParams = object ["method" .= dotPath, "params" .= params]
-  fmap (fmap (map unwrapPlexusCallItem)) $ rpcCallWith cfg "plexus.call" callParams
+  rpcCallWith cfg "plexus.call" callParams
 
 -- | Invoke with raw method path
--- Automatically unwraps CallEvent from plexus.call responses
 invokeRaw :: SubstrateConfig -> Text -> Value -> IO (Either Text [PlexusStreamItem])
 invokeRaw cfg method params = do
   let callParams = object ["method" .= method, "params" .= params]
-  fmap (fmap (map unwrapPlexusCallItem)) $ rpcCallWith cfg "plexus.call" callParams
-
--- | Unwrap CallEvent from plexus.call responses (streaming callback version)
--- If the item is from plexus.call, parse the content as CallEvent and unwrap
-unwrapPlexusCall :: (PlexusStreamItem -> IO ()) -> PlexusStreamItem -> IO ()
-unwrapPlexusCall onItem item = onItem (unwrapPlexusCallItem item)
-
--- | Unwrap a single PlexusStreamItem from plexus.call
--- If content_type is "plexus.call", unwrap the CallEvent inside
-unwrapPlexusCallItem :: PlexusStreamItem -> PlexusStreamItem
-unwrapPlexusCallItem item@(StreamData hash prov ct content)
-  | ct == "plexus.call" =
-      case fromJSON content of
-        Data.Aeson.Types.Success callEvent -> unwrapCallEvent hash prov callEvent
-        Data.Aeson.Types.Error _ -> item  -- Failed to parse, return original
-  | otherwise = item
-unwrapPlexusCallItem item = item  -- Non-data items pass through
+  rpcCallWith cfg "plexus.call" callParams
